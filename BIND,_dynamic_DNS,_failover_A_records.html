@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr" class="client-nojs">
+<head>
+<title>BIND, dynamic DNS, failover A records - FreeBSDwiki</title>
+<meta charset="UTF-8" />
+<meta name="generator" content="MediaWiki 1.18.0" />
+<link rel="alternate" type="application/x-wiki" title="Edit" href="/index.php?title=BIND,_dynamic_DNS,_failover_A_records&amp;action=edit" />
+<link rel="edit" title="Edit" href="/index.php?title=BIND,_dynamic_DNS,_failover_A_records&amp;action=edit" />
+<link rel="shortcut icon" href="/favicon.ico" />
+<link rel="search" type="application/opensearchdescription+xml" href="/opensearch_desc.php" title="FreeBSDwiki (en)" />
+<link rel="EditURI" type="application/rsd+xml" href="http://freebsdwiki.net/api.php?action=rsd" />
+<link rel="alternate" type="application/atom+xml" title="FreeBSDwiki Atom feed" href="/index.php?title=Special:RecentChanges&amp;feed=atom" />
+<link rel="stylesheet" href="/load.php?debug=false&amp;lang=en&amp;modules=mediawiki.legacy.commonPrint%2Cshared%7Cskins.monobook&amp;only=styles&amp;skin=monobook&amp;*" />
+<!--[if lt IE 5.5000]><link rel="stylesheet" href="/skins/monobook/IE50Fixes.css?303" media="screen" /><![endif]-->
+<!--[if IE 5.5000]><link rel="stylesheet" href="/skins/monobook/IE55Fixes.css?303" media="screen" /><![endif]-->
+<!--[if IE 6]><link rel="stylesheet" href="/skins/monobook/IE60Fixes.css?303" media="screen" /><![endif]-->
+<!--[if IE 7]><link rel="stylesheet" href="/skins/monobook/IE70Fixes.css?303" media="screen" /><![endif]--><meta name="ResourceLoaderDynamicStyles" content="" />
+<style>a:lang(ar),a:lang(ckb),a:lang(fa),a:lang(kk-arab),a:lang(mzn),a:lang(ps),a:lang(ur){text-decoration:none}a.new,#quickbar a.new{color:#ba0000}
+
+/* cache key: bsdwiki:resourceloader:filter:minify-css:4:c88e2bcd56513749bec09a7e29cb3ffa */
+</style>
+<script src="/load.php?debug=false&amp;lang=en&amp;modules=startup&amp;only=scripts&amp;skin=monobook&amp;*"></script>
+<script>if(window.mw){
+	mw.config.set({"wgCanonicalNamespace": "", "wgCanonicalSpecialPageName": false, "wgNamespaceNumber": 0, "wgPageName": "BIND,_dynamic_DNS,_failover_A_records", "wgTitle": "BIND, dynamic DNS, failover A records", "wgCurRevisionId": 8535, "wgArticleId": 2178, "wgIsArticle": true, "wgAction": "view", "wgUserName": null, "wgUserGroups": ["*"], "wgCategories": ["Common Tasks", "DNS"], "wgBreakFrames": false, "wgRestrictionEdit": [], "wgRestrictionMove": []});
+}
+</script><script>if(window.mw){
+	mw.loader.load(["mediawiki.page.startup"]);
+}
+</script>
+</head>
+<body class="mediawiki ltr sitedir-ltr ns-0 ns-subject page-BIND_dynamic_DNS_failover_A_records action-view skin-monobook">
+<div id="globalWrapper">
+<a href="http://tehinterweb.net/parking.php"><!-- ill-eternal --></a>
+<div id="column-content"><div id="content">
+	<a id="top"></a>
+	
+	<h1 id="firstHeading" class="firstHeading">BIND, dynamic DNS, failover A records</h1>
+	<div id="bodyContent">
+		<div id="siteSub">From FreeBSDwiki</div>
+		<div id="contentSub"></div>
+		<div id="jump-to-nav">Jump to: <a href="#column-one">navigation</a>, <a href="#searchInput">search</a></div>
+		<!-- start content -->
+<div lang="en" dir="ltr" class="mw-content-ltr"><table id="toc" class="toc"><tr><td><div id="toctitle"><h2>Contents</h2></div>
+<ul>
+<li class="toclevel-1 tocsection-1"><a href="#The_problem:_inexpensive_but_unreliable_ISPs"><span class="tocnumber">1</span> <span class="toctext">The problem: inexpensive but unreliable ISPs</span></a></li>
+<li class="toclevel-1 tocsection-2"><a href="#The_solution:_ddns-failover.pl_.28another_freebsdwiki.net_original.29"><span class="tocnumber">2</span> <span class="toctext">The solution: ddns-failover.pl (another freebsdwiki.net original)</span></a></li>
+<li class="toclevel-1 tocsection-3"><a href="#Setting_up_permissions"><span class="tocnumber">3</span> <span class="toctext">Setting up permissions</span></a></li>
+<li class="toclevel-1 tocsection-4"><a href="#Testing_the_script_manually"><span class="tocnumber">4</span> <span class="toctext">Testing the script manually</span></a></li>
+<li class="toclevel-1 tocsection-5"><a href="#Installing_and_running_the_crontab"><span class="tocnumber">5</span> <span class="toctext">Installing and running the crontab</span></a></li>
+</ul>
+</td></tr></table>
+<h2><span class="editsection">[<a href="/index.php?title=BIND,_dynamic_DNS,_failover_A_records&amp;action=edit&amp;section=1" title="Edit section: The problem: inexpensive but unreliable ISPs">edit</a>]</span> <span class="mw-headline" id="The_problem:_inexpensive_but_unreliable_ISPs"> The problem: inexpensive but unreliable ISPs </span></h2>
+<p>If you've got a multi-homed network with multiple IP addresses from different ISPs, but you aren't a big enough organization to convince your ISPs to build <a href="/index.php?title=BGP&amp;action=edit&amp;redlink=1" class="new" title="BGP (page does not exist)">BGP</a> routes to connect to each other at your network, you will probably find it really handy to have a single DNS record that will automatically choose the best way to get to your network from the outside world.
+</p><p>In this example, "BSDcompany" runs a small office network (<b>office.bsdcompany.com</b>) and a server in a colocated network facility (<b>coloserver.bsdcompany.com</b>).   Frequently, they need to access network resources inside the office from the internet.  Since neither of the two ISPs available at BSDcompany's office are particularly reliable, BSDcompany has a cable modem from one of them, a DSL modem from the other, and a dual-WAN router.  Both the cable and the DSL use dynamic IP addresses, and the company already has a server in the office doing <a href="/index.php/BIND_(dynamic_DNS)" title="BIND (dynamic DNS)" class="mw-redirect">dynamic DNS updates</a> to <b>cable-ip.office.bsdcompany.com</b> and <b>dsl-ip.office.bsdcompany.com</b>.
+</p><p>BSDcompany's dual-WAN router provides load balancing and automatic failover redundancy for internet access from within the office.  But BSDcompany wants similar redundancy and balancing from the <i>outside</i> coming <i>in</i> as well.  So instead of randomly trying cable-ip.office.bsdcompany.com and dsl-ip.office.bsdcompany.com to see which (if either) is working at any particular time, they just want to be able to use a single name all the time and have it automatically take them to whichever ISP is up and/or faster at the moment.
+</p>
+<h2><span class="editsection">[<a href="/index.php?title=BIND,_dynamic_DNS,_failover_A_records&amp;action=edit&amp;section=2" title="Edit section: The solution: ddns-failover.pl (another freebsdwiki.net original)">edit</a>]</span> <span class="mw-headline" id="The_solution:_ddns-failover.pl_.28another_freebsdwiki.net_original.29"> The solution: ddns-failover.pl (another freebsdwiki.net original) </span></h2>
+<p>BSDcompany decides to set up a <a href="/index.php/Cron" title="Cron">cron</a> job on their colo server to check the status and latency of each of their office WAN IPs. That script will then automatically update a third A record, <b>office.bsdcompany.com</b>, with whichever is currently the quicker of the two office WANs to respond - and if both WANs are down, it will delete the record entirely until one or the other of them comes back up.
+</p><p>(Like the <b>set-ddns.pl</b> script in the <a href="/index.php/BIND_(dynamic_DNS)" title="BIND (dynamic DNS)" class="mw-redirect">previous dynamic DNS article</a>, the variables <b>ddns-failover.pl</b> in UPPERCASE are things you should set to match your own situation, while the ones in lower or mixed case are generally things you shouldn't need to mess with.)
+</p>
+<pre>#!/usr/bin/perl
+
+# ddns-failover.pl
+#
+# Copyright (c) 05-20-2006, JRS System Solutions
+# All rights reserved under standard BSD license
+# details: http://www.opensource.org/licenses/bsd-license.php
+#
+# Check each of two public IPs for the same multi-homed host,
+# and set a dynamic DNS A record to point to the lower latency
+# of the two.  If both routes are down, delete the hostname
+# entirely until one or both IPs come back up.
+
+$WANDNS1 = 'cable-ip.office.bsdcompany.com';
+$WANDNS2 = 'dsl-ip.office.bsdcompany.com';
+$HOSTNAME = 'office.bsdcompany.com';
+$NAMESERVER = 'coloserver.bsdcompany.com';
+$KEYFILE = 'Koffice.bsdcompany.com.+157+15661.private';
+$KEYDIR = '/usr/home/ddns';
+$TTL = '10';
+
+@wan1 = split(/\n/,`/sbin/ping -qc 1 -t 1 $WANDNS1`);
+@wan2 = split(/\n/,`/sbin/ping -qc 1 -t 1 $WANDNS2`);
+
+$wan1[0] =~ /\((\d*?\.\d*?\.\d*?\.\d*?)\)/;
+$wan1_ip = $1;
+if ($wan1_ip == '') { $wan1_ip = 'NO HOST FOUND'; }
+$wan2[0] =~ /\((\d*?\.\d*?\.\d*?\.\d*?)\)/;
+$wan2_ip = $1;
+if ($wan2_ip == '') { $wan2_ip = 'NO HOST FOUND'; }
+
+$wan1[3] =~ /(\d*?) packets received/;
+$wan1_rcvd = $1;
+$wan2[3] =~ /(\d*?) packets received/;
+$wan2_rcvd = $1;
+
+$wan1[4] =~ /\/(\d*?\.\d*?)\//;
+$wan1_time = $1;
+$wan2[4] =~ /\/(\d*?\.\d*?)\//;
+$wan2_time = $1;
+
+if ($wan1_rcvd != 1 &amp;&amp; $wan2_rcvd == 1) {
+        print &quot;WAN1 [$wan1_ip]: NO RESPONSE\nWAN2 [$wan2_ip]: $wan2_time&quot; . &quot;ms\nSET $HOSTNAME: WAN2\n&quot;;
+        $dnsip=$wan2_ip;
+} elsif ($wan1_rcvd == 1 &amp;&amp; $wan2_rcvd != 1) {
+        print &quot;WAN1 [$wan1_ip]: $wan1_time&quot; . &quot;ms\nWAN2 [$wan2_ip]: NO RESPONSE\nSET $HOSTNAME: WAN1\n&quot;;
+        $dnsip=$wan1_ip;
+} elsif ($wan1_rcvd != 1 &amp;&amp; $wan2_rcvd !=1) {
+        print &quot;WAN1 [$wan1_ip]: NO RESPONSE\nWAN2 [$wan2_ip]: NO RESPONSE\nDELETE $HOSTNAME\n&quot;;
+        $dnsip='NO';
+} elsif ($wan1_time &lt;= $wan2_time) {
+        print &quot;WAN1 [$wan1_ip]: $wan1_time&quot; . &quot;ms\nWAN2 [$wan2_ip]: $wan2_time&quot; . &quot;ms\nSET $HOSTNAME: WAN1\n&quot;;
+        $dnsip=$wan1_ip;
+} else {
+        print &quot;WAN1 [$wan1_ip]: $wan1_time&quot; . &quot;ms\nWAN2 [$wan2_ip]: $wan2_time&quot; . &quot;ms\nSET $HOSTNAME: WAN2\n&quot;;
+        $dnsip=$wan2_ip;
+}
+
+chdir ($KEYDIR);
+open (NSUPDATE, &quot;| /usr/sbin/nsupdate -k $KEYFILE&quot;);
+print NSUPDATE &quot;server $NAMESERVER\n&quot;;
+print NSUPDATE &quot;update delete $HOSTNAME A\n&quot;;
+if ($dnsip ne 'NO') {
+        print NSUPDATE &quot;update add $HOSTNAME $TTL A $dnsip\n&quot;;
+}
+# print NSUPDATE &quot;show\n&quot;;
+print NSUPDATE &quot;send\n&quot;;
+close (NSUPDATE);
+</pre>
+<h2><span class="editsection">[<a href="/index.php?title=BIND,_dynamic_DNS,_failover_A_records&amp;action=edit&amp;section=3" title="Edit section: Setting up permissions">edit</a>]</span> <span class="mw-headline" id="Setting_up_permissions"> Setting up permissions </span></h2>
+<p>To minimize security risks, the gurus at BSDcompany create a new user named "ddns", put this script and the copies of the key files for the zone (which they already had, when they <a href="/index.php/BIND_(dynamic_DNS)" title="BIND (dynamic DNS)" class="mw-redirect">set up their dynamic DNS</a> earlier) in the "ddns" user's home directory, and make sure to set the permissions on everything as restrictively as possible before setting up the <a href="/index.php/Cron" title="Cron">cron</a> job to actually run it.
+</p>
+<pre>coloserver# <b>pw useradd ddns -s /sbin/nologin -d /usr/home/ddns</b>
+coloserver# <b>mkdir /home/ddns</b>
+coloserver# <b>cp /etc/namedb/zones/keys/Koffice.bsdcompany.com.+157+15661.private .</b>
+coloserver# <b>cp /etc/namedb/zones/keys/Koffice.bsdcompany.com.+157+15661.key .</b>
+coloserver# <b>chmod 400 Koffice.bsdcompany.com.+157+15661.*</b>
+coloserver# <b>chmod 500 ddns-failover.pl</b>
+coloserver# <b>ls -l</b>
+-r--------  1 ddns  wheel   130 May 20 12:22 Kph34r.tehinterweb.net.+157+23266.key
+-r--------  1 ddns  wheel   145 May 20 13:17 Kph34r.tehinterweb.net.+157+23266.private
+-r-x------  1 ddns  wheel  3108 May 23 01:27 ddns-failover.pl
+coloserver# '<i>su ddns</i>
+This account is currently not available.
+</pre>
+<p>Excellent: the <b>ddns</b> account is present but cannot be interactively logged into, the key files are readable (but not writeable or executable) only to it, and the script is executable (but not writeable) only to it.  Now that the permissions are correct, it's time to do a test run - we'll run the script manually (using <a href="/index.php/Sudo" title="Sudo">sudo</a> to do so as the user <b>ddns</b>, just like the <a href="/index.php/Cron" title="Cron">cron</a> job will) before we set it up to run automatically.
+</p>
+<h2><span class="editsection">[<a href="/index.php?title=BIND,_dynamic_DNS,_failover_A_records&amp;action=edit&amp;section=4" title="Edit section: Testing the script manually">edit</a>]</span> <span class="mw-headline" id="Testing_the_script_manually"> Testing the script manually </span></h2>
+<pre>coloserver# <b>sudo -u ddns /usr/bin/perl /usr/home/ddns/ddns-failover.pl</b>
+WAN1 [128.32.64.5]: 94.302ms
+WAN2 [144.69.42.18]: 85.341ms
+SET office.bsdcompany.com: WAN2
+coloserver# <b>ping -qc 1 office.bsdcompany.com</b>
+PING office.bsdcompany.com (144.69.42.18): 56 data bytes
+
+--- office.bsdcompany.com ping statistics ---
+1 packets transmitted, 1 packets received, 0% packet loss
+round-trip min/avg/max/stddev = 85.038/85.038/85.038/0.000 ms
+</pre>
+<p>Perfect!  Now, the BSDcompany folks force an apparent fail condition on WAN2 to make sure it fails over properly:
+</p>
+<pre>coloserver# <b>nsupdate -k Koffice.bsdcompany.com.+157+15661.private</b>
+&gt; <b>update delete dsl-ip.office.bsdcompany.com</b>
+&gt; <b>send</b>
+&gt; <b>quit</b>
+coloserver# <b>sudo -u ddns /usr/bin/perl /usr/home/ddns/ddns-failover.pl</b>
+WAN1 [128.32.64.5]: 98.213ms
+WAN2 [NO HOST FOUND]: NO RESPONSE
+SET office.bsdcompany.net: WAN1
+coloserver# <b>ping -qc 1 office.bsdcompany.com</b>
+PING office.bsdcompany.com (128.32.64.5): 56 data bytes
+
+--- office.bsdcompany.com ping statistics ---
+1 packets transmitted, 1 packets received, 0% packet loss
+round-trip min/avg/max/stddev = 97.188/97.188/97.188/0.000 ms
+</pre>
+<p>Good!  Now they force WAN1 to apparently fail at the same time, to ensure the record is deleted entirely if both WANs go down (so you get an immediate failure response if both WANs are down, instead of having to wait for a pointless and possibly very lengthy network timeout first):
+</p>
+<pre>coloserver# <b>nsupdate -k Koffice.bsdcompany.com.+157+15661.private</b>
+&gt; <b>update delete cable-ip.office.bsdcompany.com</b>
+&gt; <b>update delete dsl-ip.office.bsdcompany.com</b>
+&gt; <b>send</b>
+&gt; <b>quit</b>
+coloserver# <b>sudo -u ddns /usr/bin/perl /usr/home/ddns/ddns-failover.pl</b>
+WAN1 [NO HOST FOUND]: NO RESPONSE
+WAN2 [NO HOST FOUND]: NO RESPONSE
+DELETE office.bsdcompany.net
+coloserver# <b>ping -qc 1 office.bsdcompany.com</b>
+ping: cannot resolve office.bsdcompany.com: Unknown host
+</pre>
+<p>Outstanding.
+</p>
+<h2><span class="editsection">[<a href="/index.php?title=BIND,_dynamic_DNS,_failover_A_records&amp;action=edit&amp;section=5" title="Edit section: Installing and running the crontab">edit</a>]</span> <span class="mw-headline" id="Installing_and_running_the_crontab"> Installing and running the <a href="/index.php/Crontab" title="Crontab">crontab</a> </span></h2>
+<p>Now that we've thoroughly tested our script, we can set it up as a <a href="/index.php/Crontab" title="Crontab">crontab</a> to run once per minute, just like the <a href="/index.php/Crontab" title="Crontab">crontab</a> that runs <a href="/index.php?title=Set-ddns.pl&amp;action=edit&amp;redlink=1" class="new" title="Set-ddns.pl (page does not exist)">set-ddns.pl</a> on the server <i>inside</i> the office to update <b>cable-ip</b> and <b>dsl-ip</b>.
+</p>
+<pre>coloserver# <b>crontab -u ddns -e</b>
+</pre>
+<pre>* * * * * /usr/bin/perl /usr/home/ddns/ddns-failover.pl &gt; /dev/null
+</pre>
+<p>To be completely thorough, now we'll break the record one last time and let the cron job fix it behind us:
+</p>
+<pre>coloserver# <b>nsupdate -k Koffice.bsdcompany.com.+157+15661.private</b>
+&gt; <b>update delete office.bsdcompany.com A</b>
+&gt; <b>send</b>
+&gt; <b>quit</b>
+coloserver# <b>date</b>
+Tue May 23 04:17:48 EDT 2006
+coloserver# <b>ping -qc 1 office.bsdcompany.com</b>
+ping: cannot resolve office.bsdcompany.com: Unknown host
+coloserver# <b>date</b>
+Tue May 23 04:18:03 EDT 2006
+coloserver# <b>ping -qc 1 office.bsdcompany.com</b>
+PING office.bsdcompany.com (144.69.42.18): 56 data bytes
+
+--- office.bsdcompany.com ping statistics ---
+1 packets transmitted, 1 packets received, 0% packet loss
+round-trip min/avg/max/stddev = 86.338/86.338/86.338/0.000 ms
+</pre>
+<p>As soon as the minute ticked over, our crontab fired up and did what it's supposed to.  So now that we've thoroughly tested both the script and the tab that runs it, we can forget about it and just use our failover A record without having to think about it anymore.
+</p>
+<!-- 
+NewPP limit report
+Preprocessor node count: 27/1000000
+Post-expand include size: 0/2097152 bytes
+Template argument size: 0/2097152 bytes
+Expensive parser function count: 0/100
+-->
+
+<!-- Saved in parser cache with key bsdwiki:pcache:idhash:2178-0!*!0!!en!*!* and timestamp 20111223050431 -->
+</div><div class="printfooter">
+Retrieved from "<a href="http://freebsdwiki.net/index.php?title=BIND,_dynamic_DNS,_failover_A_records&amp;oldid=8535">http://freebsdwiki.net/index.php?title=BIND,_dynamic_DNS,_failover_A_records&amp;oldid=8535</a>"</div>
+		<div id='catlinks' class='catlinks'><div id="mw-normal-catlinks"><a href="/index.php/Special:Categories" title="Special:Categories">Categories</a>: <ul><li><a href="/index.php/Category:Common_Tasks" title="Category:Common Tasks">Common Tasks</a></li><li><a href="/index.php/Category:DNS" title="Category:DNS">DNS</a></li></ul></div></div>		<!-- end content -->
+				<div class="visualClear"></div>
+	</div>
+</div></div>
+<div id="column-one">
+	<div id="p-cactions" class="portlet">
+		<h5>Views</h5>
+		<div class="pBody">
+			<ul>
+				<li id="ca-nstab-main" class="selected"><a href="/index.php/BIND,_dynamic_DNS,_failover_A_records" title="View the content page [c]" accesskey="c">Page</a></li>
+				<li id="ca-talk" class="new"><a href="/index.php?title=Talk:BIND,_dynamic_DNS,_failover_A_records&amp;action=edit&amp;redlink=1" title="Discussion about the content page [t]" accesskey="t">Discussion</a></li>
+				<li id="ca-edit"><a href="/index.php?title=BIND,_dynamic_DNS,_failover_A_records&amp;action=edit" title="You can edit this page. Please use the preview button before saving [e]" accesskey="e">Edit</a></li>
+				<li id="ca-history"><a href="/index.php?title=BIND,_dynamic_DNS,_failover_A_records&amp;action=history" title="Past revisions of this page [h]" accesskey="h">History</a></li>
+			</ul>
+		</div>
+	</div>
+	<div class="portlet" id="p-personal">
+		<h5>Personal tools</h5>
+		<div class="pBody">
+			<ul>
+				<li id="pt-login"><a href="/index.php?title=Special:UserLogin&amp;returnto=BIND%2C_dynamic_DNS%2C_failover_A_records" title="You are encouraged to log in; however, it is not mandatory [o]" accesskey="o">Log in / create account</a></li>
+			</ul>
+		</div>
+	</div>
+	<div class="portlet" id="p-logo">
+		<a title="Visit the main page" style="background-image: url(/skins/common/images/bsdwiki.png);" href="/index.php/Main_Page"></a>
+	</div>
+	<script type="text/javascript"> if (window.isMSIE55) fixalpha(); </script>
+	<div class="generated-sidebar portlet" id="p-navigation">
+		<h5>Navigation</h5>
+		<div class='pBody'>
+			<ul>
+				<li id="n-mainpage-description"><a href="/index.php/Main_Page" title="Visit the main page [z]" accesskey="z">Main page</a></li>
+				<li id="n-portal"><a href="/index.php/FreeBSDwiki:Community_portal" title="About the project, what you can do, where to find things">Community portal</a></li>
+				<li id="n-currentevents"><a href="/index.php/FreeBSDwiki:Current_events" title="Find background information on current events">Current events</a></li>
+				<li id="n-recentchanges"><a href="/index.php/Special:RecentChanges" title="A list of recent changes in the wiki [r]" accesskey="r">Recent changes</a></li>
+				<li id="n-randompage"><a href="/index.php/Special:Random" title="Load a random page [x]" accesskey="x">Random page</a></li>
+				<li id="n-help"><a href="/index.php/Help:Contents" title="The place to find out">Help</a></li>
+			</ul>
+		</div>
+	</div>
+	<div id="p-search" class="portlet">
+		<h5><label for="searchInput">Search</label></h5>
+		<div id="searchBody" class="pBody">
+			<form action="/index.php" id="searchform">
+				<input type='hidden' name="title" value="Special:Search"/>
+				<input type="search" name="search" title="Search FreeBSDwiki [f]" accesskey="f" id="searchInput" />
+				<input type="submit" name="go" value="Go" title="Go to a page with this exact name if exists" id="searchGoButton" class="searchButton" />&#160;
+				<input type="submit" name="fulltext" value="Search" title="Search the pages for this text" id="mw-searchButton" class="searchButton" />
+			</form>
+		</div>
+	</div>
+	<div class="portlet" id="p-tb">
+		<h5>Toolbox</h5>
+		<div class="pBody">
+			<ul>
+				<li id="t-whatlinkshere"><a href="/index.php/Special:WhatLinksHere/BIND,_dynamic_DNS,_failover_A_records" title="A list of all wiki pages that link here [j]" accesskey="j">What links here</a></li>
+				<li id="t-recentchangeslinked"><a href="/index.php/Special:RecentChangesLinked/BIND,_dynamic_DNS,_failover_A_records" title="Recent changes in pages linked from this page [k]" accesskey="k">Related changes</a></li>
+				<li id="t-specialpages"><a href="/index.php/Special:SpecialPages" title="A list of all special pages [q]" accesskey="q">Special pages</a></li>
+				<li><a href="/index.php?title=BIND,_dynamic_DNS,_failover_A_records&amp;printable=yes" rel="alternate">Printable version</a></li>
+				<li id="t-permalink"><a href="/index.php?title=BIND,_dynamic_DNS,_failover_A_records&amp;oldid=8535" title="Permanent link to this revision of the page">Permanent link</a></li>
+			</ul>
+		</div>
+	</div>
+</div><!-- end of the left (by default at least) column -->
+<div class="visualClear"></div>
+<div id="footer">
+	<div id="f-poweredbyico">
+		<a href="http://www.mediawiki.org/"><img src="/skins/common/images/poweredby_mediawiki_88x31.png" alt="Powered by MediaWiki" width="88" height="31" /></a>
+	</div>
+	<ul id="f-list">
+		<li id="lastmod"> This page was last modified on 21 June 2007, at 13:20.</li>
+		<li id="viewcount">This page has been accessed 12,046 times.</li>
+		<li id="privacy"><a href="/index.php/FreeBSDwiki:Privacy_policy" title="FreeBSDwiki:Privacy policy">Privacy policy</a></li>
+		<li id="about"><a href="/index.php/FreeBSDwiki:About" title="FreeBSDwiki:About">About FreeBSDwiki</a></li>
+		<li id="disclaimer"><a href="/index.php/FreeBSDwiki:General_disclaimer" title="FreeBSDwiki:General disclaimer">Disclaimers</a></li>
+	</ul>
+</div>
+</div>
+<script>if(window.mw){
+	mw.loader.load(["mediawiki.user", "mediawiki.util", "mediawiki.page.ready", "mediawiki.legacy.wikibits", "mediawiki.legacy.ajax"]);
+}
+</script>
+<script>if(window.mw){
+	mw.user.options.set({"ccmeonemails":0,"cols":80,"date":"default","diffonly":0,"disablemail":0,"disablesuggest":0,"editfont":"default","editondblclick":0,"editsection":1,"editsectiononrightclick":0,"enotifminoredits":0,"enotifrevealaddr":0,"enotifusertalkpages":1,"enotifwatchlistpages":0,"extendwatchlist":0,"externaldiff":0,"externaleditor":0,"fancysig":0,"forceeditsummary":0,"gender":"unknown","hideminor":0,"hidepatrolled":0,"highlightbroken":1,"imagesize":2,"justify":0,"math":1,"minordefault":0,"newpageshidepatrolled":0,"nocache":0,"noconvertlink":0,"norollbackdiff":0,"numberheadings":0,"previewonfirst":0,"previewontop":1,"quickbar":5,"rcdays":7,"rclimit":50,"rememberpassword":0,"rows":25,"searchlimit":20,"showhiddencats":0,"showjumplinks":1,"shownumberswatching":1,"showtoc":1,"showtoolbar":1,"skin":"monobook","stubthreshold":0,"thumbsize":2,"underline":2,"uselivepreview":0,"usenewrc":0,"watchcreations":0,"watchdefault":0,"watchdeletion":0,"watchlistdays":3,"watchlisthideanons":0,
+	"watchlisthidebots":0,"watchlisthideliu":0,"watchlisthideminor":0,"watchlisthideown":0,"watchlisthidepatrolled":0,"watchmoves":0,"wllimit":250,"variant":"en","language":"en","searchNs0":true,"searchNs1":false,"searchNs2":false,"searchNs3":false,"searchNs4":false,"searchNs5":false,"searchNs6":false,"searchNs7":false,"searchNs8":false,"searchNs9":false,"searchNs10":false,"searchNs11":false,"searchNs12":false,"searchNs13":false,"searchNs14":false,"searchNs15":false});;mw.user.tokens.set({"editToken":"+\\","watchToken":false});;mw.loader.state({"user.options":"ready","user.tokens":"ready"});
+	
+	/* cache key: bsdwiki:resourceloader:filter:minify-js:4:99acc2c3ab516bb21085c70c2195f3df */
+}
+</script><!-- Served in 0.183 secs. --></body><!-- Cached/compressed 20111223053055 -->
+</html>
