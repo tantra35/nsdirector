@@ -755,7 +755,7 @@ use vars qw(
 	    $SMTP
 	    $CLEANSTOP
 	    $MAINTDIR
-
+			$KEYFILE
 	    $CALLBACK
 	    $CFGNAME
 	    $CMD
@@ -867,15 +867,16 @@ if ($opt_v) {
 	&ld_exit(0, "");
 }
 
-if ($DEBUG>0 and -f "./ipvsadm") {
-	$IPVSADM="./ipvsadm";
+if ($DEBUG>0 and -f "./nsupdate") {
+	$IPVSADM="./nsupdate";
 } else {
-	if (-x "/sbin/ipvsadm") {
-		$IPVSADM="/sbin/ipvsadm";
-	} elsif (-x "/usr/sbin/ipvsadm") {
-		$IPVSADM="/usr/sbin/ipvsadm";
+	if (-x "/bin/nsupdate") {
+		$IPVSADM="/bin/nsupdate";
+	} elsif (-x "/usr/bin/nsupdate") {
+		$IPVSADM="/usr/bin/nsupdate";
 	} else {
-		die "Can not find ipvsadm";
+		$IPVSADM="";
+		#die "Can not find nsupdate";
 	}
 }
 
@@ -892,7 +893,7 @@ $DAEMON_STATUS = $DAEMON_STATUS_STARTING;
 ld_init();
 ld_setup();
 ld_start();
-ld_cmd_children("start", %LD_INSTANCE);
+ld_cmd_children("start", %LD_INSTANCE);                           
 $DAEMON_STATUS = $DAEMON_STATUS_RUNNING;
 ld_main();
 
@@ -1339,6 +1340,7 @@ sub read_config
 			$vsrv{addressfamily} = $af;
 			$vsrv{real} = \@rsrv;
 			$vsrv{scheduler} = "wrr";
+			$vsrv{ttl} = 180;
 			$vsrv{checkcommand} = "/bin/true";
 			$vsrv{request} = "/";
 			$vsrv{receive} = "";
@@ -1458,6 +1460,9 @@ sub read_config
 				} elsif ($rcmd =~ /^netmask\s*=\s*(.*)/) {
 					$1 =~ /(\d+\.\d+\.\d+\.\d+)/ or &config_error($line, "invalid netmask");
 					$vsrv{netmask} = $1;
+				} elsif ($rcmd =~ /^ttl\s*=\s*(.*)/) {
+					$1 =~ /(\d+)/ or &config_error($line, "invalid domain ttl");
+					$vsrv{ttl} = $1;
 				} elsif ($rcmd =~ /^protocol\s*=\s*(.*)/) {
 					if ( $1 =~ /(\w+)/ ) {
 						if ( $vsrv{protocol} eq "fwm" ) {
@@ -1712,6 +1717,12 @@ sub read_config
 			$MAINTDIR = $1;
 			-d $MAINTDIR or &config_warn($line,
 					"maintenance directory does not exist");
+		} elsif  ($linedata  =~ /^keyfile\s*=\s*\"(.*)\"/) {
+			$1 =~ /(.+)/ or &config_error($line,
+					"keyfile not specified");
+			$KEYFILE = $1;
+			-f $KEYFILE or &config_error($line,
+					"keyfile not exist");
 		} else {
 			if ($linedata  =~ /^timeout\s*=\s*(.*)/) {
 				&config_error($line,
@@ -1941,25 +1952,23 @@ sub _ld_read_config_real_resolve
 
 	for $i (@$rsrv_todo) {
 		($str, $line)=@$i;
-		$str =~	 /(\d+\.\d+\.\d+\.\d+|[A-Za-z0-9.-]+|\[[0-9A-fa-f:]+\])(->(\d+\.\d+\.\d+\.\d+|[A-Za-z0-9.-]+|\[[0-9A-fa-f:]+\]))?(:(\d+|[A-Za-z0-9-_]+))?\s+(.*)/
+		$str =~	 /(\d+\.\d+\.\d+\.\d+|[A-Za-z0-9.-]+|\[[0-9A-fa-f:]+\])(->(\d+\.\d+\.\d+\.\d+|[A-Za-z0-9.-]+|\[[0-9A-fa-f:]+\]))?(:(\d+|[A-Za-z0-9-_]+))?(\s+(.*))?/
 			or &config_error($line,
 				"invalid address for real server" .
 				" (wrong format)");
+
 		$ip1=$1;
 		$ip2=$3;
-		if(defined($5)){
-			$port=$5;
-		}
-		else {
-			$port="0";
-		}
+		$port=defined($5)?$5:"0";
 		$flags=$6;
 		$resolved_ip1=&ld_gethostbyname($ip1, $af);
+
 		unless( defined($resolved_ip1) ) {
 			&config_error($line,
 				"invalid address ($ip1) for real server" .
 				" (could not resolve host)");
 		}
+
 		if( defined($port) ){
 			$resolved_port=&ld_getservbyname($port);
 			unless( defined($resolved_port) ){
@@ -1968,6 +1977,7 @@ sub _ld_read_config_real_resolve
 					" (could not resolve port)");
 			}
 		}
+
 		if ( defined ($ip2) ) {
 			$resolved_ip2=&ld_gethostbyname($ip2, $af);
 			unless( defined ($resolved_ip2) ) {
@@ -2058,14 +2068,7 @@ sub add_real_server
 	my $new_rsrv;
 	my $rsrv;
 
-	$new_rsrv = {"server"=>$ip, "port"=>$port};
-
-	$flags =~ /(\w+)(.*)/ && ($1 eq "gate" || $1 eq "masq" || $1 eq "ipip")
-		or &config_error($line,	"forward method must be gate, masq or ipip");
-
-	$new_rsrv->{"forward"} =$1;
-	$flags = $2;
-
+	$new_rsrv = {"server" => $ip, "port" => $port, "forward" => ""};
 	$rsrv=$vsrv->{"real"};
 
 	if(defined($flags) and $flags =~ /\s+(\d+)(.*)/) {
@@ -2339,102 +2342,6 @@ sub ld_readline
 	return undef;
 }
 
-# ld_read_ipvsadm
-# Parses the output of "ipvsadm -L -n" and puts into a structure of
-# the following from:
-#
-# {
-#   (vip_address:vport|fwmark) protocol => {
-#     "scheduler" => scheduler,
-#     "persistent" => timeout,     # May be omitted
-#     "netmask" => netmask,        # May be omitted
-#     "real" => {
-#       rip_address:rport => {
-#         "forward" => forwarding_mechanism,
-#         "weight"  => weight
-#       },
-#       ...
-#     }
-#   },
-#   ...
-# }
-#
-# where:
-#   vip_address: IP address of virtual service
-#   vport: Port of virtual service
-#   fwmark: Firewall Mark of virtual service
-#   scheduler: Scheduler for virtual service
-#   timeout: Timeout for persistency. Omitted if service is not persistent.
-#   nemask: Netmask for persistency. Omitted if service is not persistent.
-#
-#   rip_address: IP address of real server
-#   rport: Port of real server
-#   forwarding_mechanism: Forwarding mechanism for real server.
-#                         One of: gate, ipip, masq.
-#   weight: Weight of real server
-#
-# pre: none
-# post: ipvsadm -L -n is parsed
-# result: reference to sructure detailed above.
-sub ld_read_ipvsadm
-{
-	my %oldsrv;
-	my $real_service;
-	my $fwd;
-	my $buf = [];
-	my $fh;
-	my $line;
-
-	# read status of current ipvsadm -L -n
-	unless(open($fh, "$IPVSADM -L -n 2>&1|")){
-		&ld_exit(1, "Could not run $IPVSADM -L -n: $!");
-	}
-
-	# Skip the first three lines
-	$line = ld_readline($fh, $buf);
-	$line = ld_readline($fh, $buf);
-	$line = ld_readline($fh, $buf);
-
-	while (1) {
-		$line = ld_readline($fh, $buf);
-		if (not defined $line) {
-			last;
-		}
-		if ($line =~ /^(\w+)\s+(\d+\.\d+\.\d+\.\d+\:\d+|\[[0-9A-Fa-f:]+\]:\d+|\d+)\s+(\w+)\s+persistent\s+(\d+)\s+mask\s+(.*)/) {
-			$real_service = "$2 ".lc($1);
-			$oldsrv{"$real_service"} = {"real"=>{}, "scheduler"=>$3, "persistent"=>$4, "netmask"=>$5};
-		} elsif ($line =~ /^(\w+)\s+(\d+\.\d+\.\d+\.\d+\:\d+|\[[0-9A-Fa-f:]+\]:\d+|\d+)\s+(\w+)\s+persistent\s+(\d+)/) {
-			$real_service = "$2 ".lc($1);
-			$oldsrv{"$real_service"} = {"real"=>{}, "scheduler"=>$3, "persistent"=>$4};
-		} elsif ($line =~ /^(\w+)\s+(\d+\.\d+\.\d+\.\d+\:\d+|\[[0-9A-Fa-f:]+\]:\d+|\d+)\s+(\w+)/) {
-			$real_service = "$2 ".lc($1);
-			$oldsrv{"$real_service"} = {"real"=>{}, "scheduler"=>$3};
-		} elsif ($line =~ /^  ->\s+(\d+\.\d+\.\d+\.\d+\:\d+|\[[0-9A-Fa-f:]+\]:\d+)\s+(\w+)\s+(\d+)/) {
-			if (not defined( $real_service)) {
-				&ld_debug(2, "Real server read from ipvsadm " .
-					  "doesn't seem to be inside a " .
-					  "virtual service: \"$line\"\n");
-				next;
-			}
-			if ($2 eq "Route") {
-				$fwd = "gate";
-			} elsif ($2 eq "Tunnel") {
-				$fwd = "ipip";
-			} elsif ($2 eq "Masq") {
-				$fwd = "masq";
-			}
-			$oldsrv{"$real_service"}->{"real"}->{"$1"} = {"forward"=>$fwd, "weight"=>$3};
-		} else {
-			&ld_debug(2, "Unknown line read from ipvsadm: " .
-				  "\"$line\"\n");
-			next;
-		}
-	}
-	close($fh);
-
-	return(\%oldsrv);
-}
-
 sub ld_start
 {
 	my $oldsrv;
@@ -2443,23 +2350,16 @@ sub ld_start
 	my $nr;
 	my $server_down = {};
 
-	# read status of current ipvsadm -L -n
-	$oldsrv=&ld_read_ipvsadm();
-
 	# make sure virtual servers are up to date
-	foreach $nv (@VIRTUAL) {
-		my $real_service = &get_virtual($nv) . " "  . $nv->{protocol};
-
-		if (exists($oldsrv->{"$real_service"})) {
-			# service exists, modify it
-			&system_wrapper("$IPVSADM -E $$nv{flags}");
-			&ld_log("Changed virtual server: " . &get_virtual($nv));
-		}
-		else {
-			# no such service, create a new one
-			&system_wrapper("$IPVSADM -A $$nv{flags}");
-			&ld_log("Added virtual server: " . &get_virtual($nv));
-		}
+	foreach $nv (@VIRTUAL)
+	{
+		my($l_domain, ) = split(/\:/, &get_virtual($nv), 2);
+	
+		open (NSUPDATE, "| $IPVSADM -k $KEYFILE");
+		print NSUPDATE "server localhost\n";
+		print NSUPDATE "update delete $l_domain A\n";
+		print NSUPDATE "send\n";
+		close (NSUPDATE);	
 	}
 
 	# make sure real servers are up to date
@@ -3732,97 +3632,14 @@ sub _remove_service
 {
 	my ($v, $rservice, $rforw, $tag) = (@_);
 
-	my $oldsrv;
-	my $ov;
-	my $or;
-	my $ipvsadm_args;
-	my $log_args;
-	my $virtual_str;
-	my $old_rservice;
-	my $is_quiescent;
-
-	$virtual_str = &get_virtual($v);
-
-	$oldsrv=&ld_read_ipvsadm();
-	$ov=$oldsrv->{$virtual_str . " " . $v->{"protocol"}};
-	if(!defined($ov)){
-		return;
-	}
-
-	if ($tag ne "fallback"
-			and ((defined $$v{quiescent}
-					and $$v{quiescent} eq "yes")
-				or (!defined($$v{quiescent})
-					and $QUIESCENT eq "yes"))){
-		$is_quiescent = "quiescent";
-	}
-
-	$or=$ov->{"real"}->{$rservice};
-
-	# If a virtual service is a IP/port service (not fwmark)
-	# and a real-servers uses a forwarding mechanism other than masq
-	# then the port will always be that of the virtual service.
-	# This includes real-servers that LVS has set to use
-	# the local forwarding mechanism because their IP address
-	# is local. Thus, if $rservice does not exist test
-	# for the same ip address with the virtual servers port.
-	# N.B: This could cause strange things to happen if
-	# there is a clash between two real servers on different ports
-	# that LVS has mapped to being the same thing.
-	if(!defined($or)) {
-		$old_rservice = $rservice;
-		$rservice =~ /(.*):(.*)/;
-		$rservice = $1;
-		$virtual_str =~ /(.*):(.*)/;
-		$rservice .= ":" . $2;
-		$or=$ov->{"real"}->{$rservice};
-		# If this doesn't exist either, use the original service.
-		# Otherwise if masq and quiescence is in use, the
-		# real server is not local, and it has an alternate port to
-		# the virtual server, using the mapped service will
-		# result in a quiescent service being created on the
-		# virtual server's port, which is not wanted.
-		if(!defined($or)) {
-			$rservice = $old_rservice;
-			$old_rservice = undef;
-		}
-	}
-
-	if((!defined($or) and !defined($is_quiescent)) or
-			(defined($is_quiescent) and defined($or) and
-				$or->{"weight"} eq 0 and
-				get_forward_flag($or->{"forward"}) eq $rforw)){
-		return;
-	}
-
-	$ipvsadm_args = "$$v{proto} " . &get_virtual_option($v) . " -r $rservice";
-	$log_args = "$tag server: $rservice ";
-	if(defined($old_rservice)) {
-		$log_args .= "mapped from $old_rservice "
-	}
-	$log_args .= "($virtual_str)";
-
-	my $server_str=$rservice . " " . $virtual_str;
-	my $currenttime=time();
-	if(defined($is_quiescent)) {
-		if (defined($or)) {
-			&system_wrapper("$IPVSADM -e "
-					. "$ipvsadm_args $rforw -w 0");
-		}
-		else {
-			&system_wrapper("$IPVSADM -a "
-					. "$ipvsadm_args $rforw -w 0");
-		}
-		&ld_log("Quiescent $log_args (Weight set to 0)");
-		&ld_emailalert_send("Quiescent $log_args (Weight set to 0)",
-				    $v, $rservice, $currenttime);
-	}
-	else {
-		&system_wrapper("$IPVSADM -d $ipvsadm_args");
-		&ld_log("Deleted $log_args");
-		&ld_emailalert_send("Deleted $log_args", $v,
-				    $rservice, $currenttime);
-	}
+	my($l_domain, ) = split(/\:/, &get_virtual($v), 2);
+	my($l_ip, ) = split(/\:/, $rservice, 2);
+	
+	open (NSUPDATE, "| $IPVSADM -k $KEYFILE");
+	print NSUPDATE "server localhost\n";
+	print NSUPDATE "update delete $l_domain A $l_ip\n";
+	print NSUPDATE "send\n";
+	close (NSUPDATE);
 }
 
 # _restore_service
@@ -3849,42 +3666,15 @@ sub _restore_service
 {
 	my ($v, $rservice, $rforw, $rwght, $tag) = (@_);
 
-	my $oldsrv;
-	my $ov;
-	my $or;
-	my $ipvsadm_args;
-	my $log_args;
+	my($l_domain, ) = split(/\:/, &get_virtual($v), 2);
+	my($l_ip, ) = split(/\:/, $rservice, 2);
 
-	$ipvsadm_args = "$$v{proto} " . &get_virtual_option($v)
-			. " -r $rservice $rforw -w $rwght";
-	$log_args = "$tag server: $rservice "
-		    . "(" #. scalar(%{$v->{real_status}})
-		    .  &get_virtual($v) . ")";
-
-	#if the server exists then restore its weight
-	# otherwise add the server
-	$oldsrv=&ld_read_ipvsadm();
-	$ov=$oldsrv->{&get_virtual($v) . " " . $v->{"protocol"}};
-	if(defined($ov)){
-		$or=$ov->{"real"}->{$rservice};
-	}
-	if(defined($or)){
-		unless($or->{"weight"} eq $rwght and
-			get_forward_flag($or->{"forward"}) eq $rforw){
-			&system_wrapper("$IPVSADM -e $ipvsadm_args");
-			&ld_log("Restored $log_args (Weight set to $rwght)");
-			&ld_emailalert_send("Restored $log_args " .
-					    "(Weight set to $rwght)",
-					    $v, $rservice, 0);
-		}
-	}
-	else {
-		&system_wrapper("$IPVSADM -a $ipvsadm_args");
-		&ld_log("Added $log_args (Weight set to $rwght)");
-		&ld_emailalert_send("Added $log_args (Weight set to $rwght)",
-				    $v, $rservice, 0);
-	}
-}
+	open (NSUPDATE, "| $IPVSADM -k $KEYFILE");
+	print NSUPDATE "server localhost\n";
+	print NSUPDATE "update add $l_domain $v->{'ttl'} A $l_ip\n";
+	print NSUPDATE "send\n";
+	close (NSUPDATE);
+			}
 
 # Check the status of a server
 # Should only be called from _status_up, _status_down,
@@ -4663,7 +4453,7 @@ sub ip_to_int
 	unless(&is_ip($ip_address)){ return(-1); }
 	unless($ip_address=~m/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/){ return(-1); }
 
-	return(((((($1<<8)+$2)<<8)+$3)<<8)+$4);
+	return(((((($1 << 8)+$2) << 8)+$3) << 8)+$4);
 }
 
 # int_to_ip
@@ -5032,9 +4822,9 @@ sub ld_gethostbyaddr
 	if (!defined($host[3])) {
 		return undef;
 	}
-	my @ret = getnameinfo($host[3], NI_NAMEREQD);
-	return undef unless(scalar(@ret) == 2);
-	return $ret[0];
+#	my @ret = getnameinfo($host[3], NI_NAMEREQD);
+#	return undef unless(scalar(@ret) == 2);
+#	return $ret[0];
 }
 
 # ld_getservbyname
@@ -5081,8 +4871,7 @@ sub ld_gethostservbyname{
 		$ip =~ s/(:(\d+|[A-Za-z0-9-_]+))?$//;
 	} else {
 		$ip = $hostserv;
-	}
-	$ip=&ld_gethostbyname($ip, $af)  or return(undef);
+	};
 
 	if(defined($port)){
 		$port=&ld_getservbyname($port, $protocol);
