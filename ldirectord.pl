@@ -810,11 +810,11 @@ $SERVICE_DOWN	=1;
 # default values
 $DAEMON_TERM      = undef;
 $DAEMON_HUP       = undef;
-$LDIRECTORD       = ld_find_cmd("ldirectord", 1);
+$LDIRECTORD       = ld_find_cmd("nsdirectord", 1);
 if (! defined $LDIRECTORD) {
-	$LDIRECTORD = "/usr/sbin/ldirectord";
+	$LDIRECTORD = "/usr/sbin/nsdirectord";
 }
-$RUNPID           = "/var/run/ldirectord";
+$RUNPID           = "/var/run/nsdirectord";
 
 $CRLF = "\x0d\x0a";
 
@@ -952,8 +952,8 @@ sub ld_init
 		}
 		$CMD = $ARGV[1];
 	} elsif ( defined $ARGV[0] ) {
-		$CONFIG = "ldirectord.cf";
-		$CFGNAME = "ldirectord";
+		$CONFIG = "nsdirectord.cf";
+		$CFGNAME = "nsdirectord";
 		$CMD = $ARGV[0];
 	}
 	if ( $CMD ne "start" and $CMD ne "stop" and $CMD ne "status"
@@ -989,7 +989,7 @@ sub ld_init
 		# Check to make sure this isn't a stale pid file
 		if (open(FILE, "</proc/$filepid/cmdline")) {
 			$_ = <FILE>;
-			if (/ldirectord/) {
+			if (/nsdirectord/) {
 				$oldpid = $filepid;
 			}
 			close(FILE);
@@ -997,10 +997,10 @@ sub ld_init
 	}
 	if (defined $oldpid) {
 		if ($CMD eq "start") {
-			ld_exit(0, "Exiting from ldirectord $CMD");
+			ld_exit(0, "Exiting from nsdirectord $CMD");
 		} elsif ($CMD eq "stop") {
 			kill 15, $oldpid;
-			ld_exit(0, "Exiting from ldirectord $CMD");
+			ld_exit(0, "Exiting from nsdirectord $CMD");
 		} elsif ($CMD eq "restart" or $CMD eq "try-restart") {
 			kill 15, $oldpid;
 			while (-f "$RUNPID.$CFGNAME.pid") {
@@ -1010,35 +1010,35 @@ sub ld_init
 			# N.B Fall through
 		} elsif ($CMD eq "reload" or $CMD eq "force-reload") {
 			kill 1, $oldpid;
-			ld_exit(0, "Exiting from ldirectord $CMD");
+			ld_exit(0, "Exiting from nsdirectord $CMD");
 		} else { # status
-			print STDERR "ldirectord for $CONFIG is running with pid: $oldpid\n";
+			print STDERR "nsdirectord for $CONFIG is running with pid: $oldpid\n";
 			ld_cmd_children("status", %LD_INSTANCE);
-			ld_log("ldirectord for $CONFIG is running with pid: $oldpid");
-			ld_log("Exiting from ldirectord $CMD");
-			ld_exit(0, "Exiting from ldirectord $CMD");
+			ld_log("nsdirectord for $CONFIG is running with pid: $oldpid");
+			ld_log("Exiting from nsdirectord $CMD");
+			ld_exit(0, "Exiting from nsdirectord $CMD");
 		}
 	} else {
 		if ($CMD eq "start" or $CMD eq "restart") {
 			;
 		} elsif ($CMD eq "stop" or $CMD eq "try-restart") {
-			ld_exit(0, "Exiting from ldirectord $CMD");
+			ld_exit(0, "Exiting from nsdirectord $CMD");
 		} elsif ($CMD eq "status") {
 			my $status;
 			if (defined $filepid) {
-				print STDERR "ldirectord stale pid file " .
+				print STDERR "nsdirectord stale pid file " .
 					"$RUNPID.$CFGNAME.pid for $CONFIG\n";
-				ld_log("ldirectord stale pid file " .
+				ld_log("nsdirectord stale pid file " .
 					"$RUNPID.$CFGNAME.pid for $CONFIG");
 				$status = 1;
 			} else {
 				$status = 3;
 			}
-			print "ldirectord is stopped for $CONFIG\n";
-			ld_exit($status, "Exiting from ldirectord $CMD");
+			print "nsdirectord is stopped for $CONFIG\n";
+			ld_exit($status, "Exiting from nsdirectord $CMD");
 		} else {
-			ld_log("ldirectord is stopped for $CONFIG");
-			ld_exit(1, "Exiting from ldirectord $CMD");
+			ld_log("nsdirectord is stopped for $CONFIG");
+			ld_exit(1, "Exiting from nsdirectord $CMD");
 		}
 	}
 
@@ -1250,7 +1250,7 @@ sub set_defaults
 	$FALLBACK6        = undef;
 	$FALLBACKCOMMAND  = undef;
 	$FORKING          = "no";
-	$LDIRLOG          = "/var/log/ldirectord.log";
+	$LDIRLOG          = "/var/log/nsdirectord.log";
 	$MAINTDIR         = undef;
 	$NEGOTIATETIMEOUT = -1;
 	$QUIESCENT        = "no";
@@ -1440,10 +1440,10 @@ sub read_config
 					# scheduler against a list of know
 					# schedulers. This is because from
 					# time to time new schedulers are
-					# added. But ldirectord is
+					# added. But nsdirectord is
 					# maintained distributed
 					# independently of this. Thus
-					# ldirectord needs to be manually
+					# nsdirectord needs to be manually
 					# updated/upgraded.  So just accept
 					# any scheduler that matches
 					# [a-z]+. I.e. is syntactically
@@ -1524,11 +1524,11 @@ sub read_config
 					}
 					elsif($vsrv{service} eq "sip" and
 							$vsrv{login} eq "") {
-						$vsrv{login} = "ldirectord\@$HOSTNAME";
+						$vsrv{login} = "nsdirectord\@$HOSTNAME";
 					}
 					if($vsrv{service} eq "ftp" and
 							$vsrv{passwd} eq "") {
-						$vsrv{passwd} = "ldirectord\@$HOSTNAME";
+						$vsrv{passwd} = "nsdirectord\@$HOSTNAME";
 					}
 				} elsif ($rcmd =~ /^httpmethod\s*=\s*(.*)/) {
 					$1 =~ /(\w+)/ && (uc($1) eq "GET" || uc($1) eq "HEAD")
@@ -1791,7 +1791,7 @@ sub _ld_read_config_virtual_resolve
 }
 
 # ld_service_to_port
-# Resolve an ldirectord service name from its port number
+# Resolve an nsdirectord service name from its port number
 # pre: port: port number of the service
 # return: port name
 #         "none" if the service is unknown
@@ -1822,7 +1822,7 @@ sub ld_port_to_service
 }
 
 # ld_service_to_port
-# Resolve the port number from an ldirectord service name
+# Resolve the port number from an nsdirectord service name
 # pre: service: name of the service
 # return: port number
 #         undef if the service is unknown
@@ -2419,7 +2419,7 @@ sub ld_start
 sub ld_cmd_children
 {
 	my ($cmd, %children) = (@_);
-	# instantiate other ldirectord, if specified
+	# instantiate other nsdirectord, if specified
 	my $child;
 	foreach $child (keys %children) {
 		if ($cmd eq "reload_or_start") {
@@ -2542,13 +2542,13 @@ sub run_child
 	my $real = $$v{real};
 	my $virtual_id = get_virtual_id_str($v);
 	my $checkinterval = $$v{checkinterval} || $CHECKINTERVAL;
-	$0 = "ldirectord $virtual_id";
+	$0 = "nsdirectord $virtual_id";
 	while (1) {
 		foreach my $r (@$real) {
-			$0 = "ldirectord $virtual_id checking $$r{server}";
+			$0 = "nsdirectord $virtual_id checking $$r{server}";
 			_check_real($v, $r);
 		}
-		$0 = "ldirectord $virtual_id";
+		$0 = "nsdirectord $virtual_id";
 		sleep $checkinterval;
 		ld_emailalert_resend();
 	}
@@ -3087,7 +3087,7 @@ sub check_sql
 	# director_slave where enabled=1' This way you can have, say, a
 	# MEMORY table in MySQL where you insert a value into a row
 	# (enabled) that says whether or not you want to actually use this
-	# in the pool from ldirector / ipvs, and disable them without
+	# in the pool from nsdirectord / ipvs, and disable them without
 	# actually turning off your sql server.
 	
 	$sth->execute;
@@ -3613,7 +3613,7 @@ sub service_set
 # Remove a real server by either making it quiescent or deleting it
 # Should be called by _service_down or fallback_off
 # I.e. If you want to change the state of a real server call service_set.
-#      If you call this function directly then ldirectord will lose track
+#      If you call this function directly then nsdirectord will lose track
 #      of the state of real servers.
 # If the real server exists (which it should) make it quiescent or
 # delete it, depending on the global and per virtual service quiescent flag.
@@ -3646,7 +3646,7 @@ sub _remove_service
 # Make a retore a real server. The opposite of _quiescent_server.
 # Should be called by _service_up or fallback_on
 # I.e. If you want to change the state of a real server call service_set.
-#      If you call this function directly then ldirectord will lose track
+#      If you call this function directly then nsdirectord will lose track
 #      of the state of real servers.
 # If the real server exists (which it should) make it quiescent. If it
 # doesn't exist, just leave it as it will be added by the _service_up code
@@ -3761,7 +3761,7 @@ sub _status_down
 # Bring a real service up if it is down
 # Should be called by service_set only
 # I.e. If you want to change the state of a real server call service_set.
-#      If you call this function directly then ldirectord will lose track
+#      If you call this function directly then nsdirectord will lose track
 #      of the state of real servers.
 # pre: v: reference to virtual service to with the real server belongs
 #      r: reference to the real server to take down
@@ -3792,7 +3792,7 @@ sub _service_up
 # Bring a real service down if it is up
 # Should be called by service_set only
 # I.e. if you want to change the state of a real server call service_set.
-#      If you call this function directly then ldirectord will lose track
+#      If you call this function directly then nsdirectord will lose track
 #      of the state of real servers.
 # pre: v: reference to virtual service to with the real server belongs
 #      r: reference to the real server to take down
@@ -4024,7 +4024,7 @@ sub ld_openlog
 	{
 		# Assume LDIRLOG is a logfacility, log to syslog
 		setlogsock( "unix" );
-		openlog( "ldirectord", "pid", "$LDIRLOG" );
+		openlog( "nsdirectord", "pid", "$LDIRLOG" );
 	}
 	return(0);
 }
@@ -4166,7 +4166,7 @@ sub ld_emailalert_net_smtp
 		}
 		$smtp->datasend("To: $to_addr\n");
 		$smtp->datasend("Subject: $subject\n\n");
-		$smtp->datasend("ldirectord host: $hostname\n" .
+		$smtp->datasend("nsdirectord host: $hostname\n" .
 				"Log-Message: $subject\n" .
 				"Daemon-Status: " .
 				&daemon_status_str() . "\n");
@@ -4198,7 +4198,7 @@ sub ld_emailalert_mail_send
 	$emailmsg = new Mail::Send Subject=>$subject, To=>$to_addr;
 	$emailmsg->set('From', $EMAILALERTFROM) if ($EMAILALERTFROM);
 	$emailfh = $emailmsg->open;
-	print $emailfh "ldirectord host: " . hostname() . "\n" .
+	print $emailfh "nsdirectord host: " . hostname() . "\n" .
 		       "Log-Message: $subject\n" .
 		       "Daemon-Status: " . &daemon_status_str() . "\n";
 	unless ($emailfh->close) {
@@ -4258,7 +4258,7 @@ sub ld_debug
 #
 # WARNING: Do not use alarm() together with this function.  A internal
 # pipe will not be reclaimed (at least with Perl 5.8.8).  This can
-# cause ldirectord to run out of file handles.
+# cause nsdirectord to run out of file handles.
 #
 # pre: LIST: arguments to pass to system()
 # post: system() is called and if it returns non-zero a failure
