@@ -1,6 +1,6 @@
 #!/usr/bin/perl -w
 ######################################################################
-# ldirectord                 http://www.vergenet.net/linux/ldirectord/
+# nsdirectord                 http://www.vergenet.net/linux/ldirectord/
 # Linux Director Daemon - run "perldoc ldirectord" for details
 #
 # 1999-2006 (C) Jacob Rief <jacob.rief@tiscover.com>,
@@ -859,7 +859,7 @@ if ($opt_v) {
 	      "1999-2006 Jacob Rief, Horms and others\n" .
 	      "<http://www.vergenet.net/linux/ldirectord/>\n".
 	      "\n" .
-	      "ldirectord comes with ABSOLUTELY NO WARRANTY.\n" .
+	      "nsdirectord comes with ABSOLUTELY NO WARRANTY.\n" .
 	      "This is free software, and you are welcome to redistribute it\n".
 	      "under certain conditions. " .
 		      "See the GNU General Public Licence for details.\n");
@@ -972,7 +972,7 @@ sub ld_init
 	undef @OLDVIRTUAL;
 
 	{
-		my $log_str = "Invoking ldirectord invoked as: $0 ";
+		my $log_str = "Invoking nsdirectord invoked as: $0 ";
 		for my $i (@ARGV) {
 			$log_str .= $i . " ";
 		}
