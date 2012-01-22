@@ -2453,7 +2453,7 @@ sub ld_start
 	{
 		my($l_domain, ) = split(/\:/, &get_virtual($nv), 2);
 
-		my $l_execcmd = "$PY_NSUPDATE -h $CONTROLPOINT -f add_domain $l_domain $nv->{ttl}";
+		my $l_execcmd = "$PY_NSUPDATE $CONTROLPOINT -f add_domain $l_domain $nv->{ttl}";
 		&system_wrapper($l_execcmd);	
 	
 		if (exists($nv->{backets}))
@@ -2463,7 +2463,7 @@ sub ld_start
 				my $l_bvalue = $nv->{backets}->{$l_bname};
 				my $l_is_default = exists($l_bvalue->{default})?'True':'False';
 
-				my $l_execcmd = "$PY_NSUPDATE -h $CONTROLPOINT -f add_domain_backet $l_domain $l_bname $l_bvalue->{longtitude} $l_bvalue->{latitude} $l_is_default";
+				my $l_execcmd = "$PY_NSUPDATE $CONTROLPOINT -f add_domain_backet $l_domain $l_bname $l_bvalue->{longtitude} $l_bvalue->{latitude} $l_is_default";
 				&system_wrapper($l_execcmd);
 			};
 		};
@@ -3758,7 +3758,7 @@ sub _remove_service
 		};
 	};
 	
-	my $l_execcmd = "$PY_NSUPDATE -h $CONTROLPOINT -f rmv_domain_backet_ip $l_domain $l_real_backet $l_ip";
+	my $l_execcmd = "$PY_NSUPDATE $CONTROLPOINT -f rmv_domain_backet_ip $l_domain $l_real_backet $l_ip";
 	&system_wrapper($l_execcmd);
 }
 
@@ -3808,7 +3808,7 @@ sub _restore_service
 		};
 	};
 
- 	my $l_execcmd = "$PY_NSUPDATE -h $CONTROLPOINT -f add_domain_backet_ip $l_domain $l_real_backet $l_ip";
+ 	my $l_execcmd = "$PY_NSUPDATE $CONTROLPOINT -f add_domain_backet_ip $l_domain $l_real_backet $l_ip";
 	&system_wrapper($l_execcmd);
 }
 
@@ -4097,7 +4097,7 @@ sub purge_untracked_service
 		};
 	};
 	
-	my $l_execcmd = "$PY_NSUPDATE -h $CONTROLPOINT -f add_domain_backet_ip $l_domain $l_real_backet $l_ip";
+	my $l_execcmd = "$PY_NSUPDATE $CONTROLPOINT -f add_domain_backet_ip $l_domain $l_real_backet $l_ip";
 	&system_wrapper($l_execcmd);
 
 	&ld_log($log_arg);
@@ -4119,7 +4119,7 @@ sub purge_virtual
 	my ($v, $tag) = (@_);
 	my($l_domain, ) = split(/\:/, &get_virtual($v), 2);
 
-	my $l_execcmd = "$PY_NSUPDATE -h $CONTROLPOINT -f rmv_domain $l_domain";
+	my $l_execcmd = "$PY_NSUPDATE $CONTROLPOINT -f rmv_domain $l_domain";
 	&system_wrapper($l_execcmd);
 
 	&ld_log("Purged virtual server ($tag): " .  &get_virtual($v));
