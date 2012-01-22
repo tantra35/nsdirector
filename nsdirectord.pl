@@ -755,7 +755,7 @@ use vars qw(
 	    $SMTP
 	    $CLEANSTOP
 	    $MAINTDIR
-			$KEYFILE
+			$CONTROLPOINT
 	    $CALLBACK
 	    $CFGNAME
 	    $CMD
@@ -765,7 +765,7 @@ use vars qw(
 	    $FALLBACK6
 	    $FALLBACKCOMMAND
 	    $SUPERVISED
-	    $IPVSADM
+	    $PY_NSUPDATE
 	    $checksum
 	    $DAEMON_STATUS
 	    $DAEMON_STATUS_STARTING
@@ -867,16 +867,15 @@ if ($opt_v) {
 	&ld_exit(0, "");
 }
 
-if ($DEBUG>0 and -f "./nsupdate") {
-	$IPVSADM="./nsupdate";
+if ($DEBUG>0 and -f "./py-nsupdate") {
+	$PY_NSUPDATE="./py-nsupdate";
 } else {
-	if (-x "/bin/nsupdate") {
-		$IPVSADM="/bin/nsupdate";
-	} elsif (-x "/usr/bin/nsupdate") {
-		$IPVSADM="/usr/bin/nsupdate";
+	if (-x "/bin/py-nsupdate") {
+		$PY_NSUPDATE="/bin/py-nsupdate";
+	} elsif (-x "/usr/bin/py-nsupdate") {
+		$PY_NSUPDATE="/usr/bin/py-nsupdate";
 	} else {
-		$IPVSADM="";
-		#die "Can not find nsupdate";
+		die "Can not find py-nsupdate";
 	}
 }
 
@@ -899,6 +898,86 @@ ld_main();
 
 &ld_rm_file("$RUNPID.$CFGNAME.pid");
 &ld_exit(0, "Reached end of \"main\"");
+
+sub trim($)
+{
+	my $string = shift;
+	$string =~ s/^\s+//;
+	$string =~ s/\s+$//;
+	return $string;
+};
+
+# Left trim function to remove leading whitespace
+sub ltrim($)
+{
+	my $string = shift;
+	$string =~ s/^\s+//;
+	return $string;
+};
+
+# Right trim function to remove trailing whitespace
+sub rtrim($)
+{
+	my $string = shift;
+	$string =~ s/\s+$//;
+	return $string;
+};
+
+sub parse_backets_str_parse_block_params($)
+{
+	my $block_params = shift;
+	my $retval = {};
+
+	foreach my $l_param_str(split(/\s*\,\s*/, $block_params))
+	{
+		if ($l_param_str =~ /\:/)
+		{
+			my($l_pname, $l_pvalue) = split(/\s*\:\s*/, $l_param_str, 2);
+			$retval->{lc($l_pname)} = $l_pvalue;
+		}
+		else
+		{
+			my $l_pname = $l_param_str;
+			$retval->{lc($l_pname)} = 1;
+		};
+	};
+	
+	return $retval;
+};
+
+sub parse_backets_str($)
+{
+	my $line = shift;
+	my $retval = undef;
+
+	my $l_retval = {};
+	my $l_line = trim($line);
+	my $l_parse_error = 0;
+
+  while (length($l_line))
+  {  
+  	if($l_line =~ /(^([a-z]+)\s*\{([^\{\}]*)\})/)
+  	{  	
+  		my $l_block_name = uc($2);
+  		my $l_block_params = parse_backets_str_parse_block_params($3);
+  		
+    	$l_retval->{$l_block_name} = $l_block_params;
+  		$l_line = ltrim(substr($l_line, length($1)));
+  	}
+  	else
+  	{
+  		$l_parse_error = 1;
+  		last;
+  	};
+  };
+
+  if(!$l_parse_error)
+  {
+	  $retval = $l_retval;
+  };
+	  
+  return $retval;
+}; 
 
 # functions
 sub ld_init
@@ -1463,6 +1542,10 @@ sub read_config
 				} elsif ($rcmd =~ /^ttl\s*=\s*(.*)/) {
 					$1 =~ /(\d+)/ or &config_error($line, "invalid domain ttl");
 					$vsrv{ttl} = $1;
+				} elsif ($rcmd =~ /^backets\s*=\s*(.*)/) {
+					my $l_backets = parse_backets_str($1);
+					$l_backets or &config_error($line, "invalid domain backets formats or emty");
+					$vsrv{backets} = $l_backets;
 				} elsif ($rcmd =~ /^protocol\s*=\s*(.*)/) {
 					if ( $1 =~ /(\w+)/ ) {
 						if ( $vsrv{protocol} eq "fwm" ) {
@@ -1717,12 +1800,10 @@ sub read_config
 			$MAINTDIR = $1;
 			-d $MAINTDIR or &config_warn($line,
 					"maintenance directory does not exist");
-		} elsif  ($linedata  =~ /^keyfile\s*=\s*\"(.*)\"/) {
+		} elsif  ($linedata  =~ /^controlpoint\s*=\s*(.*)/) {
 			$1 =~ /(.+)/ or &config_error($line,
-					"keyfile not specified");
-			$KEYFILE = $1;
-			-f $KEYFILE or &config_error($line,
-					"keyfile not exist");
+					"controlpoint not specified");
+			$CONTROLPOINT = $1;
 		} else {
 			if ($linedata  =~ /^timeout\s*=\s*(.*)/) {
 				&config_error($line,
@@ -2077,7 +2158,7 @@ sub add_real_server
 	}
 	else {
 		$new_rsrv->{"weight"} = 1;
-	}
+	};
 
 	if(defined($flags) and $flags =~ /\s+\"(.*)\"[, ]\s*\"(.*)\"(.*)/) {
 		$new_rsrv->{"request"} = $1;
@@ -2086,7 +2167,24 @@ sub add_real_server
 		}
 		$new_rsrv->{"receive"} = $2;
 		$flags = $3;
-	}
+	};
+
+ 	if(defined($flags) and $flags =~ /\s+(\S+)(.*)/) {
+ 		$new_rsrv->{"backet"} = uc($1);
+ 		$flags = $2;
+	};
+	
+	if (exists($vsrv->{backets}))
+	{
+		if(!exists($new_rsrv->{"backet"}))
+		{
+			&config_error($line, "Real server doesn't belogn to any backets in backet config param");
+		}
+		elsif(!exists($vsrv->{backets}->{$new_rsrv->{"backet"}}))
+		{
+			&config_error($line, "Real server belong to not existent backet");
+		};
+	};
 
 	if (defined($flags) and $flags =~/\S/) {
 		&config_error($line, "Invalid real server line, around "
@@ -2350,20 +2448,26 @@ sub ld_start
 	my $nr;
 	my $server_down = {};
 
-	# make sure virtual servers are up to date
+	# make sure real servers are up to date
 	foreach $nv (@VIRTUAL)
 	{
 		my($l_domain, ) = split(/\:/, &get_virtual($nv), 2);
-	
-		open (NSUPDATE, "| $IPVSADM -k $KEYFILE");
-		print NSUPDATE "server localhost\n";
-		print NSUPDATE "update delete $l_domain A\n";
-		print NSUPDATE "send\n";
-		close (NSUPDATE);	
-	}
 
-	# make sure real servers are up to date
-	foreach $nv (@VIRTUAL) {
+		my $l_execcmd = "$PY_NSUPDATE -h $CONTROLPOINT -f add_domain $l_domain $nv->{ttl}";
+		&system_wrapper($l_execcmd);	
+	
+		if (exists($nv->{backets}))
+		{
+			foreach my $l_bname(keys(%{$nv->{backets}}))
+			{
+				my $l_bvalue = $nv->{backets}->{$l_bname};
+				my $l_is_default = exists($l_bvalue->{default})?'True':'False';
+
+				my $l_execcmd = "$PY_NSUPDATE -h $CONTROLPOINT -f add_domain_backet $l_domain $l_bname $l_bvalue->{longtitude} $l_bvalue->{latitude} $l_is_default";
+				&system_wrapper($l_execcmd);
+			};
+		};
+		
 		my $nreal = $nv->{real};
 		my $ov = $oldsrv->{&get_virtual($nv) . " " . $nv->{protocol}};
 		my $or = $ov->{real};
@@ -2389,7 +2493,7 @@ sub ld_start
 			delete($or->{$real_str});
 		}
 
-		# remove remaining entries for real servers
+		# remove remaining entries for real servers		
 		for my $k (keys %$or) {
 			purge_untracked_service($nv, $k, "start");
 			delete($$or{$k});
@@ -3631,15 +3735,31 @@ sub service_set
 sub _remove_service
 {
 	my ($v, $rservice, $rforw, $tag) = (@_);
-
+	my $l_reals = $v->{'real'};
+	
 	my($l_domain, ) = split(/\:/, &get_virtual($v), 2);
 	my($l_ip, ) = split(/\:/, $rservice, 2);
+	my $l_real_backet;
 	
-	open (NSUPDATE, "| $IPVSADM -k $KEYFILE");
-	print NSUPDATE "server localhost\n";
-	print NSUPDATE "update delete $l_domain A $l_ip\n";
-	print NSUPDATE "send\n";
-	close (NSUPDATE);
+	foreach my $l_real(@$l_reals)
+	{
+		if($l_real->{server} eq $l_ip)
+		{
+			if (exists($v->{backets}))
+			{
+				$l_real_backet = $l_real->{backet};
+			}
+			else
+			{
+				$l_real_backet = "LB";
+			};
+
+			last;
+		};
+	};
+	
+	my $l_execcmd = "$PY_NSUPDATE -h $CONTROLPOINT -f rmv_domain_backet_ip $l_domain $l_real_backet $l_ip";
+	&system_wrapper($l_execcmd);
 }
 
 # _restore_service
@@ -3665,16 +3785,32 @@ sub _remove_service
 sub _restore_service
 {
 	my ($v, $rservice, $rforw, $rwght, $tag) = (@_);
+	my $l_reals = $v->{'real'};
 
 	my($l_domain, ) = split(/\:/, &get_virtual($v), 2);
 	my($l_ip, ) = split(/\:/, $rservice, 2);
-
-	open (NSUPDATE, "| $IPVSADM -k $KEYFILE");
-	print NSUPDATE "server localhost\n";
-	print NSUPDATE "update add $l_domain $v->{'ttl'} A $l_ip\n";
-	print NSUPDATE "send\n";
-	close (NSUPDATE);
+	my $l_real_backet;
+	
+	foreach my $l_real(@$l_reals)
+	{
+		if($l_real->{server} eq $l_ip)
+		{
+			if (exists($v->{backets}))
+			{
+				$l_real_backet = $l_real->{backet};
 			}
+			else
+			{
+				$l_real_backet = "LB";
+			};
+		
+			last;
+		};
+	};
+
+ 	my $l_execcmd = "$PY_NSUPDATE -h $CONTROLPOINT -f add_domain_backet_ip $l_domain $l_real_backet $l_ip";
+	&system_wrapper($l_execcmd);
+}
 
 # Check the status of a server
 # Should only be called from _status_up, _status_down,
@@ -3939,8 +4075,31 @@ sub purge_untracked_service
 	my $log_arg = "Purged real server ($tag): $rservice (" .
 		      &get_virtual($v) . ")";
 
-	&system_wrapper("$IPVSADM -d $v->{proto} " . &get_virtual_option($v) .
-			" -r $rservice");
+	my $l_reals = $v->{'real'};	
+	my($l_domain, ) = split(/\:/, &get_virtual($v), 2);
+	my($l_ip, ) = split(/\:/, $rservice, 2);
+	my $l_real_backet;
+	
+	foreach my $l_real(@$l_reals)
+	{
+		if($l_real->{server} eq $l_ip)
+		{
+			if (exists($v->{backets}))
+			{
+				$l_real_backet = $l_real->{backet};
+			}
+			else
+			{
+				$l_real_backet = "LB";
+			};
+
+			last;
+		};
+	};
+	
+	my $l_execcmd = "$PY_NSUPDATE -h $CONTROLPOINT -f add_domain_backet_ip $l_domain $l_real_backet $l_ip";
+	&system_wrapper($l_execcmd);
+
 	&ld_log($log_arg);
 	&ld_emailalert_send($log_arg, $v, $rservice, 0);
 }
@@ -3958,8 +4117,11 @@ sub purge_service
 sub purge_virtual
 {
 	my ($v, $tag) = (@_);
+	my($l_domain, ) = split(/\:/, &get_virtual($v), 2);
 
-	&system_wrapper("$IPVSADM -D $v->{proto} " .  &get_virtual_option($v));
+	my $l_execcmd = "$PY_NSUPDATE -h $CONTROLPOINT -f rmv_domain $l_domain";
+	&system_wrapper($l_execcmd);
+
 	&ld_log("Purged virtual server ($tag): " .  &get_virtual($v));
 }
 
