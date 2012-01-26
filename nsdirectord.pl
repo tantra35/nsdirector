@@ -1044,6 +1044,8 @@ sub ld_init
 		$CONFIG = "/usr/etc/ha.d/$CONFIG";
 	} elsif ( -f "/usr/etc/ha.d/conf/$CONFIG" ) {
 		$CONFIG = "/usr/etc/ha.d/conf/$CONFIG";
+	} elsif ( -f "/etc/ha.d/$CONFIG" ) {
+		$CONFIG = "/etc/ha.d/$CONFIG";
 	} elsif ( ! -f "$CONFIG" ) {
 		init_error("Config file $CONFIG not found");
 	}
@@ -3739,7 +3741,7 @@ sub _remove_service
 	
 	my($l_domain, ) = split(/\:/, &get_virtual($v), 2);
 	my($l_ip, ) = split(/\:/, $rservice, 2);
-	my $l_real_backet;
+	my $l_real_backet = 'LB';
 	
 	foreach my $l_real(@$l_reals)
 	{
@@ -3748,10 +3750,6 @@ sub _remove_service
 			if (exists($v->{backets}))
 			{
 				$l_real_backet = $l_real->{backet};
-			}
-			else
-			{
-				$l_real_backet = "LB";
 			};
 
 			last;
@@ -3789,7 +3787,7 @@ sub _restore_service
 
 	my($l_domain, ) = split(/\:/, &get_virtual($v), 2);
 	my($l_ip, ) = split(/\:/, $rservice, 2);
-	my $l_real_backet;
+	my $l_real_backet = 'LB';
 	
 	foreach my $l_real(@$l_reals)
 	{
@@ -3798,10 +3796,6 @@ sub _restore_service
 			if (exists($v->{backets}))
 			{
 				$l_real_backet = $l_real->{backet};
-			}
-			else
-			{
-				$l_real_backet = "LB";
 			};
 		
 			last;
